@@ -1,0 +1,3 @@
+# Ensure Unix LF line endings are preserved for all scripts across platforms
+* text=auto eol=lf
+*.png binary

@@ -1,0 +1,24 @@
+# Backups and runtime data
+backups/
+*.bak
+*.tar.gz
+whoami_fix_backups.tar.gz
+
+# Bytecode and caches
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+
+# OS and editor artifacts
+.DS_Store
+Thumbs.db
+*.swp
+*~
+.vscode/
+.idea/
+
+# Local logs and test files
+*.log
+tests/
+test_report.html
