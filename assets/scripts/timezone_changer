@@ -1,0 +1,54 @@
+#!/bin/bash
+
+start_timezone_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [[ "$timezone_changer_status" == "Disable" ]]; then
+
+        mkdir -p "$BACKUPDIR"
+        local current_tz=""
+        if command -v timedatectl &>/dev/null; then
+            current_tz="$(timedatectl show --property=Timezone --value 2>/dev/null)"
+        fi
+        if [ -z "$current_tz" ] && [ -f /etc/timezone ]; then
+            current_tz="$(cat /etc/timezone 2>/dev/null)"
+        fi
+        [ -z "$current_tz" ] && current_tz="UTC"
+
+        echo "$current_tz" > "$BACKUPDIR/timezone.bak"
+
+        if command -v timedatectl &>/dev/null; then
+            timedatectl set-timezone UTC &>/dev/null || true
+        else
+            ln -sf /usr/share/zoneinfo/UTC /etc/localtime 2>/dev/null || true
+            [ -f /etc/timezone ] && echo "UTC" > /etc/timezone
+        fi
+
+        sed -i 's/timezone_changer_status="Disable"/timezone_changer_status="Enable"/g' "$SRCDIR/sources/config"
+        info "Timezone changer successfully enabled"
+    else
+        warn "Timezone changer is already running"
+    fi
+}
+
+stop_timezone_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [ -f "$BACKUPDIR/timezone.bak" ]; then
+        local restore_timezone="$(cat "$BACKUPDIR/timezone.bak")"
+        if [ -n "$restore_timezone" ]; then
+            if command -v timedatectl &>/dev/null; then
+                timedatectl set-timezone "$restore_timezone" &>/dev/null || true
+            else
+                ln -sf "/usr/share/zoneinfo/$restore_timezone" /etc/localtime 2>/dev/null || true
+                [ -f /etc/timezone ] && echo "$restore_timezone" > /etc/timezone
+            fi
+        fi
+        rm -f "$BACKUPDIR/timezone.bak"
+    fi
+
+    sed -i 's/timezone_changer_status="Enable"/timezone_changer_status="Disable"/g' "$SRCDIR/sources/config"
+    info "Timezone changer successfully disabled"
+}

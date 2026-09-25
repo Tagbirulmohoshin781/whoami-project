@@ -1,0 +1,68 @@
+#!/bin/bash
+
+start_hostname_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [[ "$hostname_changer_status" == "Disable" ]]; then
+
+        mkdir -p "$BACKUPDIR"
+
+        # backup original hostname
+        if [ -f /etc/hostname ]; then
+            cat /etc/hostname > "$BACKUPDIR/hostname.bak"
+        else
+            hostname > "$BACKUPDIR/hostname.bak" 2>/dev/null
+        fi
+
+        local array=(
+            "DESKTOP-$((RANDOM % 8999999 + 1000000))"
+            "LAPTOP-$((RANDOM % 8999999 + 1000000))"
+            "Windows11-Pro"
+            "Windows11-Enterprise"
+            "Windows10-Enterprise"
+            "Windows10-Pro"
+            "Windows10-Enterprise-LTSC"
+            "Windows8.1-OEM"
+            "Windows7-Professional"
+            "Windows7-Ultimate"
+            "Ubuntu-Desktop"
+            "Fedora-Workstation"
+            "MacBook-Air"
+            "MacBook-Pro"
+            "iMac-Retina"
+        )
+
+        local size=${#array[@]}
+        local index=$(($RANDOM % $size))
+        local new_hostname="${array[$index]}"
+
+        echo "$new_hostname" > /etc/hostname
+        hostname "$new_hostname" 2>/dev/null || hostnamectl set-hostname "$new_hostname" 2>/dev/null || true
+
+        sed -i 's/hostname_changer_status="Disable"/hostname_changer_status="Enable"/g' "$SRCDIR/sources/config"
+        info "Hostname changer successfully enabled (New hostname: $new_hostname)"
+    else
+        warn "Hostname changer is already running"
+    fi
+
+}
+
+stop_hostname_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [ -f "$BACKUPDIR/hostname.bak" ]; then
+        local restore_hostname="$(cat "$BACKUPDIR/hostname.bak")"
+        if [ -n "$restore_hostname" ]; then
+            echo "$restore_hostname" > /etc/hostname
+            hostname "$restore_hostname" 2>/dev/null || hostnamectl set-hostname "$restore_hostname" 2>/dev/null || true
+            info "Hostname restored to: $restore_hostname"
+        fi
+        rm -f "$BACKUPDIR/hostname.bak"
+    fi
+
+    sed -i 's/hostname_changer_status="Enable"/hostname_changer_status="Disable"/g' "$SRCDIR/sources/config"
+    info "Hostname changer successfully disabled"
+
+}

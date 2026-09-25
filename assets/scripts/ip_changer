@@ -1,0 +1,123 @@
+#!/bin/bash
+
+start_ip_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [[ "$dns_changer_status" == "Disable" ]]; then
+
+        if [[ "$ip_changer_status" == "Disable" ]]; then
+
+            if [ -z "$tor_uid" ]; then
+                tor_uid="$(id -u debian-tor 2>/dev/null || id -u tor 2>/dev/null || echo "")"
+            fi
+            if [ -z "$tor_uid" ]; then
+                err "Tor user ID not found. Ensure Tor is installed and configured."
+            fi
+
+            mkdir -p "$BACKUPDIR"
+
+            # backup existing settings
+            [ -f "$TORRC" ] && cp -f "$TORRC" "$BACKUPDIR/torrc.bak"
+            [ -f /etc/resolv.conf ] && cp -f /etc/resolv.conf "$BACKUPDIR/resolv.conf.bak"
+            iptables-save > "$BACKUPDIR/iptables.rules.bak" 2>/dev/null
+
+            # iptables transparent proxy routing
+            iptables -F
+            iptables -X
+            iptables -t nat -F
+            iptables -t nat -X
+
+            iptables -t nat -A OUTPUT -d 10.192.0.0/10 -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports 9040
+            iptables -t nat -A OUTPUT -d 127.0.0.1/32 -p udp -m udp --dport 53 -j REDIRECT --to-ports 5353
+            iptables -t nat -A OUTPUT -m owner --uid-owner "$tor_uid" -j RETURN
+            iptables -t nat -A OUTPUT -o lo -j RETURN
+
+            for lan in 127.0.0.0/8 10.0.0.0/8 172.16.0.0/12 192.168.0.0/16; do
+                iptables -t nat -A OUTPUT -d "$lan" -j RETURN
+            done
+
+            iptables -t nat -A OUTPUT -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -j REDIRECT --to-ports 9040
+            iptables -A INPUT -m state --state ESTABLISHED -j ACCEPT
+            iptables -A INPUT -i lo -j ACCEPT
+            iptables -A INPUT -j DROP
+            iptables -A FORWARD -j DROP
+            iptables -A OUTPUT -m conntrack --ctstate INVALID -j DROP
+            iptables -A OUTPUT -m state --state INVALID -j DROP
+            iptables -A OUTPUT -m state --state ESTABLISHED -j ACCEPT
+            iptables -A OUTPUT -m owner --uid-owner "$tor_uid" -p tcp -m tcp --tcp-flags FIN,SYN,RST,ACK SYN -m state --state NEW -j ACCEPT
+            iptables -A OUTPUT -d 127.0.0.1/32 -o lo -j ACCEPT
+            iptables -A OUTPUT -d 127.0.0.1/32 -p tcp -m tcp --dport 9040 --tcp-flags FIN,SYN,RST,ACK SYN -j ACCEPT
+            iptables -A OUTPUT -j DROP
+            iptables -P INPUT DROP
+            iptables -P FORWARD DROP
+            iptables -P OUTPUT DROP
+
+            cat > "$TORRC" <<EOF
+VirtualAddrNetworkIPv4 10.192.0.0/10
+AutomapHostsOnResolve 1
+TransPort 9040 IsolateClientAddr IsolateClientProtocol IsolateDestAddr IsolateDestPort
+SocksPort 9050
+DNSPort 5353
+EOF
+
+            cat > "/etc/resolv.conf" <<EOF
+# This file was edited by kali-whoami. Do not change manually!
+nameserver 127.0.0.1
+EOF
+            systemctl --system daemon-reload 2>/dev/null || true
+
+            systemctl stop tor.service 2>/dev/null || systemctl stop tor 2>/dev/null || true
+
+            # prevent IPv6 leaks
+            sysctl -w net.ipv6.conf.all.disable_ipv6=1 &> /dev/null || true
+            sysctl -w net.ipv6.conf.default.disable_ipv6=1 &> /dev/null || true
+
+            systemctl start tor.service 2>/dev/null || systemctl start tor 2>/dev/null || true
+
+            sed -i 's/ip_changer_status="Disable"/ip_changer_status="Enable"/g' "$SRCDIR/sources/config"
+            info "Ip changer successfully enabled"
+
+        else
+            warn "Ip changer is already running"
+        fi
+    else
+        warn "The Ip changer is not available. (Dns changer enabled)"
+    fi
+
+}
+
+stop_ip_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    iptables -F
+    iptables -X
+    iptables -t nat -F
+    iptables -t nat -X
+    iptables -P INPUT ACCEPT
+    iptables -P FORWARD ACCEPT
+    iptables -P OUTPUT ACCEPT
+
+    systemctl stop tor.service 2>/dev/null || systemctl stop tor 2>/dev/null || true
+
+    if [ -f "$BACKUPDIR/iptables.rules.bak" ] && [ -s "$BACKUPDIR/iptables.rules.bak" ]; then
+        iptables-restore < "$BACKUPDIR/iptables.rules.bak" 2>/dev/null || true
+    fi
+
+    # re-enable IPv6
+    sysctl -w net.ipv6.conf.all.disable_ipv6=0 &> /dev/null || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=0 &> /dev/null || true
+
+    if [ -f "$BACKUPDIR/torrc.bak" ]; then
+        cat "$BACKUPDIR/torrc.bak" > "$TORRC"
+    fi
+    if [ -f "$BACKUPDIR/resolv.conf.bak" ]; then
+        cat "$BACKUPDIR/resolv.conf.bak" > /etc/resolv.conf
+    fi
+
+    rm -f "$BACKUPDIR/resolv.conf.bak" "$BACKUPDIR/torrc.bak" "$BACKUPDIR/iptables.rules.bak"
+    sed -i 's/ip_changer_status="Enable"/ip_changer_status="Disable"/g' "$SRCDIR/sources/config"
+    info "Ip changer successfully disabled"
+
+}

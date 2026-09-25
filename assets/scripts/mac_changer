@@ -1,0 +1,98 @@
+#!/bin/bash
+
+generate_mac() {
+    local hex_chars="0123456789abcdef"
+    local b1_first="${hex_chars:$((RANDOM % 16)):1}"
+    local b1_second_choices=("2" "6" "a" "e")
+    local b1_second="${b1_second_choices[$((RANDOM % 4))]}"
+    local b1="${b1_first}${b1_second}"
+    local b2=$(printf '%02x' $((RANDOM % 256)))
+    local b3=$(printf '%02x' $((RANDOM % 256)))
+    local b4=$(printf '%02x' $((RANDOM % 256)))
+    local b5=$(printf '%02x' $((RANDOM % 256)))
+    local b6=$(printf '%02x' $((RANDOM % 256)))
+    echo "${b1}:${b2}:${b3}:${b4}:${b5}:${b6}"
+}
+
+start_mac_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [[ "$mac_changer_status" == "Disable" ]]; then
+
+        mkdir -p "$BACKUPDIR/mac_addresses"
+
+        # find valid network interfaces (ARPHRD_ETHER type 1, excluding virtual/loopback)
+        local valid_ifaces=()
+        for iface_path in /sys/class/net/*; do
+            [ -e "$iface_path" ] || continue
+            local iface=$(basename "$iface_path")
+            [ "$iface" = "lo" ] && continue
+            [[ "$iface" =~ ^(docker|veth|br-|virbr|tun|tap|wg) ]] && continue
+            [ -f "$iface_path/type" ] && [ "$(cat "$iface_path/type" 2>/dev/null)" != "1" ] && continue
+
+            if [ -f "$iface_path/address" ]; then
+                local current_mac=$(cat "$iface_path/address" 2>/dev/null)
+                if [ -n "$current_mac" ] && [ "$current_mac" != "00:00:00:00:00:00" ]; then
+                    echo "$current_mac" > "$BACKUPDIR/mac_addresses/$iface"
+                    valid_ifaces+=("$iface")
+                fi
+            fi
+        done
+
+        if [ ${#valid_ifaces[@]} -eq 0 ]; then
+            warn "No suitable network interfaces found for changing MAC addresses."
+            return
+        fi
+
+        local changed=0
+        for IFACE in "${valid_ifaces[@]}"; do
+            local attempts=0
+            while [ $attempts -lt 5 ]; do
+                local new_mac=$(generate_mac)
+                ip link set "$IFACE" down 2>/dev/null
+                if ip link set "$IFACE" address "$new_mac" 2>/dev/null; then
+                    ip link set "$IFACE" up 2>/dev/null
+                    info "Interface $IFACE: changed MAC to $new_mac"
+                    changed=1
+                    break
+                fi
+                attempts=$((attempts + 1))
+            done
+            ip link set "$IFACE" up 2>/dev/null
+        done
+
+        if [ $changed -eq 1 ]; then
+            sed -i 's/mac_changer_status="Disable"/mac_changer_status="Enable"/g' "$SRCDIR/sources/config"
+            info "Mac changer successfully enabled"
+        else
+            warn "Failed to set random MAC address on available interfaces."
+        fi
+    else
+        warn "Mac changer is already running"
+    fi
+}
+
+stop_mac_changer(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [ -d "$BACKUPDIR/mac_addresses" ]; then
+        for file in "$BACKUPDIR/mac_addresses"/*; do
+            [ -f "$file" ] || continue
+            local device=$(basename "$file")
+            local orig_mac=$(cat "$file")
+            if [ -n "$orig_mac" ]; then
+                ip link set "$device" down 2>/dev/null
+                ip link set "$device" address "$orig_mac" 2>/dev/null
+                ip link set "$device" up 2>/dev/null
+                info "Interface $device: restored original MAC ($orig_mac)"
+            fi
+        done
+        rm -rf "$BACKUPDIR/mac_addresses"
+    fi
+
+    sed -i 's/mac_changer_status="Enable"/mac_changer_status="Disable"/g' "$SRCDIR/sources/config"
+    info "Mac changer successfully disabled"
+
+}
