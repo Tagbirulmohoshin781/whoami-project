@@ -1,0 +1,46 @@
+#!/usr/bin/env python3
+
+import os
+import re
+import subprocess
+from scapy.all import Ether, ARP, srp, sniff
+
+MAC_REGEX = re.compile(r"^([0-9A-Fa-f]{2}[:-]){5}([0-9A-Fa-f]{2})$")
+banned_macs = set()
+
+def get_mac(ip):
+    try:
+        p = Ether(dst='ff:ff:ff:ff:ff:ff') / ARP(pdst=ip)
+        result = srp(p, timeout=3, verbose=False)[0]
+        if result and len(result) > 0:
+            return result[0][1].hwsrc.lower()
+    except Exception:
+        pass
+    return None
+
+def process(packet):
+    if packet.haslayer(ARP):
+        if packet[ARP].op == 2:
+            try:
+                psrc = packet[ARP].psrc
+                response_mac = packet[ARP].hwsrc.lower()
+                if not MAC_REGEX.match(response_mac):
+                    return
+                if response_mac in banned_macs:
+                    return
+
+                real_mac = get_mac(psrc)
+                if real_mac and real_mac != response_mac:
+                    subprocess.run(
+                        ["iptables", "-A", "INPUT", "-m", "mac", "--mac-source", response_mac, "-j", "DROP"],
+                        check=False
+                    )
+                    banned_macs.add(response_mac)
+            except Exception:
+                pass
+
+if __name__ == "__main__":
+    try:
+        sniff(store=False, prn=process)
+    except KeyboardInterrupt:
+        pass

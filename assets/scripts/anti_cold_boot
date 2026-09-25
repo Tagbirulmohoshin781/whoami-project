@@ -1,0 +1,29 @@
+#!/bin/bash
+
+start_anti_cold_boot(){
+
+    # Disable swap to prevent memory/key leakage to swap partition
+    swapoff -a 2>/dev/null
+
+    # Flush all filesystem buffers
+    sync
+
+    # Clear filesystem pagecache, dentries, and inodes
+    if [ -f /proc/sys/vm/drop_caches ]; then
+        echo 3 > /proc/sys/vm/drop_caches 2>/dev/null || true
+    fi
+
+    # Memory allocation and dump protection parameters
+    [ -f /proc/sys/vm/min_free_kbytes ] && echo 1024 > /proc/sys/vm/min_free_kbytes 2>/dev/null || true
+    [ -f /proc/sys/vm/oom_kill_allocating_task ] && echo 1 > /proc/sys/vm/oom_kill_allocating_task 2>/dev/null || true
+    [ -f /proc/sys/vm/overcommit_memory ] && echo 1 > /proc/sys/vm/overcommit_memory 2>/dev/null || true
+    [ -f /proc/sys/vm/oom_dump_tasks ] && echo 0 > /proc/sys/vm/oom_dump_tasks 2>/dev/null || true
+
+    # If secure memory wipe utility is installed, use it
+    if command -v sdmem &>/dev/null; then
+        sdmem -f -l -v 2>/dev/null || true
+    fi
+
+    info "Anti cold boot successfully enabled"
+
+}

@@ -1,0 +1,68 @@
+#!/bin/bash
+
+start_browser_anonymization(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    if [[ "$browser_anonymization_status" == "Disable" ]]; then
+
+        local target_dirs=(
+            "/etc/firefox-esr"
+            "/etc/firefox"
+            "/usr/lib/firefox/browser/defaults/preferences"
+            "/usr/lib/firefox-esr/defaults/pref"
+            "/usr/lib/firefox/defaults/pref"
+        )
+
+        local applied=0
+        for dir in "${target_dirs[@]}"; do
+            if [ -d "$dir" ]; then
+                cp -f "$SRCDIR/sources/whoami.js" "$dir/whoami.js"
+                applied=1
+            fi
+        done
+
+        if [ $applied -eq 0 ]; then
+            if command -v firefox-esr &>/dev/null; then
+                mkdir -p /etc/firefox-esr
+                cp -f "$SRCDIR/sources/whoami.js" /etc/firefox-esr/whoami.js
+                applied=1
+            elif command -v firefox &>/dev/null; then
+                mkdir -p /etc/firefox
+                cp -f "$SRCDIR/sources/whoami.js" /etc/firefox/whoami.js
+                applied=1
+            fi
+        fi
+
+        if [ $applied -eq 1 ]; then
+            sed -i 's/browser_anonymization_status="Disable"/browser_anonymization_status="Enable"/g' "$SRCDIR/sources/config"
+            info "Browser anonymization successfully enabled"
+        else
+            warn "Firefox installation directory not found. Please ensure Firefox or Firefox ESR is installed."
+        fi
+    else
+        warn "Browser anonymization is already running"
+    fi
+
+}
+
+stop_browser_anonymization(){
+
+    source /usr/share/kali-whoami/assets/sources/config
+
+    local target_dirs=(
+        "/etc/firefox-esr"
+        "/etc/firefox"
+        "/usr/lib/firefox/browser/defaults/preferences"
+        "/usr/lib/firefox-esr/defaults/pref"
+        "/usr/lib/firefox/defaults/pref"
+    )
+
+    for dir in "${target_dirs[@]}"; do
+        [ -f "$dir/whoami.js" ] && rm -f "$dir/whoami.js"
+    done
+
+    sed -i 's/browser_anonymization_status="Enable"/browser_anonymization_status="Disable"/g' "$SRCDIR/sources/config"
+    info "Browser anonymization successfully disabled"
+
+}

@@ -1,0 +1,120 @@
+#!/bin/bash
+
+get_backups(){
+
+    mkdir -p "$BACKUPDIR/mac_addresses"
+
+    [ -f /etc/resolv.conf ] && cp -f /etc/resolv.conf "$BACKUPDIR/resolv.conf.bak"
+    [ -f /etc/hostname ] && cp -f /etc/hostname "$BACKUPDIR/hostname.bak"
+    [ -f "$TORRC" ] && cp -f "$TORRC" "$BACKUPDIR/torrc.bak"
+    iptables-save > "$BACKUPDIR/iptables.rules.bak" 2>/dev/null
+
+    for iface_path in /sys/class/net/*; do
+        [ -e "$iface_path" ] || continue
+        local iface=$(basename "$iface_path")
+        [ "$iface" = "lo" ] && continue
+        if [ -f "$iface_path/address" ]; then
+            cat "$iface_path/address" > "$BACKUPDIR/mac_addresses/$iface" 2>/dev/null
+        fi
+    done
+
+    if command -v timedatectl &>/dev/null; then
+        timedatectl show --property=Timezone --value 2>/dev/null > "$BACKUPDIR/timezone.bak"
+    elif [ -f /etc/timezone ]; then
+        cat /etc/timezone > "$BACKUPDIR/timezone.bak"
+    fi
+
+    cd "$BACKUPDIR" && tar -czf whoami_fix_backups.tar.gz resolv.conf.bak hostname.bak torrc.bak iptables.rules.bak mac_addresses timezone.bak 2>/dev/null
+    rm -rf "$BACKUPDIR"/resolv.conf.bak "$BACKUPDIR"/hostname.bak "$BACKUPDIR"/torrc.bak "$BACKUPDIR"/iptables.rules.bak "$BACKUPDIR"/mac_addresses "$BACKUPDIR"/timezone.bak
+
+}
+
+restore_system(){
+
+    local restore_tmp="$BACKUPDIR/restore_tmp"
+    mkdir -p "$restore_tmp"
+    tar -xzf "$BACKUPDIR/whoami_fix_backups.tar.gz" -C "$restore_tmp" 2>/dev/null
+
+    if [ -f "$restore_tmp/resolv.conf.bak" ]; then
+        cat "$restore_tmp/resolv.conf.bak" > /etc/resolv.conf
+    fi
+
+    if [ -f "$restore_tmp/hostname.bak" ]; then
+        local orig_host="$(cat "$restore_tmp/hostname.bak")"
+        if [ -n "$orig_host" ]; then
+            echo "$orig_host" > /etc/hostname
+            hostname "$orig_host" 2>/dev/null || hostnamectl set-hostname "$orig_host" 2>/dev/null || true
+        fi
+    fi
+
+    if [ -f "$restore_tmp/torrc.bak" ] && [ -n "$TORRC" ]; then
+        cat "$restore_tmp/torrc.bak" > "$TORRC"
+    fi
+
+    if [ -f "$restore_tmp/iptables.rules.bak" ] && [ -s "$restore_tmp/iptables.rules.bak" ]; then
+        iptables-restore < "$restore_tmp/iptables.rules.bak" 2>/dev/null || true
+    else
+        iptables -F 2>/dev/null
+        iptables -X 2>/dev/null
+        iptables -t nat -F 2>/dev/null
+        iptables -t nat -X 2>/dev/null
+        iptables -P INPUT ACCEPT 2>/dev/null
+        iptables -P FORWARD ACCEPT 2>/dev/null
+        iptables -P OUTPUT ACCEPT 2>/dev/null
+    fi
+
+    if [ -d "$restore_tmp/mac_addresses" ]; then
+        for file in "$restore_tmp/mac_addresses"/*; do
+            [ -f "$file" ] || continue
+            local device=$(basename "$file")
+            local orig_mac=$(cat "$file")
+            if [ -n "$orig_mac" ]; then
+                ip link set "$device" down 2>/dev/null
+                ip link set "$device" address "$orig_mac" 2>/dev/null
+                ip link set "$device" up 2>/dev/null
+            fi
+        done
+    fi
+
+    if [ -f "$restore_tmp/timezone.bak" ]; then
+        local orig_tz="$(cat "$restore_tmp/timezone.bak")"
+        if [ -n "$orig_tz" ]; then
+            if command -v timedatectl &>/dev/null; then
+                timedatectl set-timezone "$orig_tz" 2>/dev/null || true
+            else
+                ln -sf "/usr/share/zoneinfo/$orig_tz" /etc/localtime 2>/dev/null || true
+                echo "$orig_tz" > /etc/timezone 2>/dev/null || true
+            fi
+        fi
+    fi
+
+    # Stop tor service if running
+    systemctl stop tor.service 2>/dev/null || systemctl stop tor 2>/dev/null || true
+
+    # Restore IPv6
+    sysctl -w net.ipv6.conf.all.disable_ipv6=0 &>/dev/null || true
+    sysctl -w net.ipv6.conf.default.disable_ipv6=0 &>/dev/null || true
+
+    # Kill anti_mitm
+    if [ "$anti_mitm_pid" != "0" ] && [ -n "$anti_mitm_pid" ]; then
+        kill "$anti_mitm_pid" 2>/dev/null || true
+    fi
+    pkill -f "assets/scripts/anti_mitm" 2>/dev/null || true
+
+    # Remove browser anonymization files
+    rm -f /etc/firefox-esr/whoami.js /etc/firefox/whoami.js /usr/lib/firefox/browser/defaults/preferences/whoami.js /usr/lib/firefox-esr/defaults/pref/whoami.js
+
+    # Clean restore temp directory
+    rm -rf "$restore_tmp"
+
+    # Reset all statuses in config
+    sed -i 's/anti_mitm_status="Enable"/anti_mitm_status="Disable"/g; \
+            s/ip_changer_status="Enable"/ip_changer_status="Disable"/g; \
+            s/dns_changer_status="Enable"/dns_changer_status="Disable"/g; \
+            s/mac_changer_status="Enable"/mac_changer_status="Disable"/g; \
+            s/timezone_changer_status="Enable"/timezone_changer_status="Disable"/g; \
+            s/hostname_changer_status="Enable"/hostname_changer_status="Disable"/g; \
+            s/browser_anonymization_status="Enable"/browser_anonymization_status="Disable"/g; \
+            s/anti_mitm_pid="[0-9]*"/anti_mitm_pid="0"/g' "$SRCDIR/sources/config"
+
+}
