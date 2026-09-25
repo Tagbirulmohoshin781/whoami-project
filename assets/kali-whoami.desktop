@@ -1,0 +1,11 @@
+[Desktop Entry]
+Name=Kali Whoami
+Encoding=UTF-8
+Comment=Enhanced Privacy and Anonymity Tool for Linux
+Exec=sh -c 'if [ -x /usr/share/kali-menu/exec-in-shell ]; then /usr/share/kali-menu/exec-in-shell "sudo kali-whoami --help"; elif command -v x-terminal-emulator >/dev/null 2>&1; then x-terminal-emulator -e "sudo kali-whoami --help"; elif command -v gnome-terminal >/dev/null 2>&1; then gnome-terminal -- sudo kali-whoami --help; else xterm -e "sudo kali-whoami --help"; fi'
+Icon=/usr/share/kali-whoami/assets/icons/kali-whoami.png
+StartupNotify=false
+Terminal=true
+Type=Application
+Categories=08-01-anonymity;08-cover-tracks;System;Security;
+X-Kali-Package=kali-whoami

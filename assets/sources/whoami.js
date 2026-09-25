@@ -1,0 +1,9 @@
+pref("privacy.firstparty.isolate", true);
+pref("privacy.resistFingerprinting", true);
+pref("privacy.trackingprotection.fingerprinting.enabled", true);
+pref("privacy.trackingprotection.cryptomining.enabled", true);
+pref("privacy.trackingprotection.enabled", true);
+pref("browser.send_pings", false);
+pref("browser.urlbar.speculativeConnect.enabled", false);
+pref("geo.enabled", false);
+pref("media.peerconnection.enabled", false);
